@@ -4,7 +4,7 @@ import Sidebar from './Sidebar';
 import Topbar from './Topbar';
 import { usePresence } from '../../hooks/usePresence';
 import NotificationPrompt from '../common/NotificationPrompt';
-
+import InstallPrompt from '../common/InstallPrompt';
 export default function AppLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   usePresence();
@@ -31,6 +31,7 @@ export default function AppLayout() {
       </div>
 
       {/* Shows banner if notifications are blocked */}
+      <InstallPrompt />
       <NotificationPrompt />
     </div>
   );
