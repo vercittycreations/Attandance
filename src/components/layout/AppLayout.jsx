@@ -3,8 +3,7 @@ import { Outlet } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import Topbar from './Topbar';
 import { usePresence } from '../../hooks/usePresence';
-
-// useFCM removed — OneSignal handles push now
+import NotificationPrompt from '../common/NotificationPrompt';
 
 export default function AppLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -30,6 +29,9 @@ export default function AppLayout() {
           <Outlet />
         </main>
       </div>
+
+      {/* Shows banner if notifications are blocked */}
+      <NotificationPrompt />
     </div>
   );
 }

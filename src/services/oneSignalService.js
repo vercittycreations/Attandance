@@ -1,141 +1,125 @@
 import OneSignal from 'react-onesignal';
 
 let initialized = false;
+let initPromise = null;
 
-// ─────────────────────────────────────────────
-// Initialize OneSignal — call once on app load
-// ─────────────────────────────────────────────
 export const initOneSignal = async () => {
   if (initialized) return;
+  if (initPromise) return initPromise;
 
-  try {
-    await OneSignal.init({
-      appId: import.meta.env.VITE_ONESIGNAL_APP_ID,
-      safari_web_id: '', // leave empty if not using Safari push
-      notifyButton: {
-        enable: false, // We handle permission ourselves
-      },
-      allowLocalhostAsSecureOrigin: true, // for local dev
-      serviceWorkerParam: { scope: '/' },
+  // Timeout added — agar 5 seconds mein init na ho toh skip karo
+  const timeout = new Promise((resolve) =>
+    setTimeout(() => resolve('timeout'), 3000)
+  );
+
+  const init = OneSignal.init({
+    appId: import.meta.env.VITE_ONESIGNAL_APP_ID,
+    notifyButton: { enable: false },
+    allowLocalhostAsSecureOrigin: true,
+    serviceWorkerParam: { scope: '/' },
+  });
+
+  initPromise = Promise.race([init, timeout])
+    .then((result) => {
+      if (result === 'timeout') {
+        console.warn('⚠️ OneSignal init timed out (blocked or slow)');
+      } else {
+        initialized = true;
+        console.log('✅ OneSignal initialized');
+      }
+    })
+    .catch(err => {
+      console.warn('⚠️ OneSignal init failed (ad blocker?):', err?.message);
+      initPromise = null;
     });
 
-    initialized = true;
-    console.log('✅ OneSignal initialized');
+  return initPromise;
+};
+
+export const requestNotificationPermission = async () => {
+  try {
+    if (!('Notification' in window)) return 'unsupported';
+    const current = Notification.permission;
+    if (current === 'granted') return 'granted';
+    if (current === 'denied')  return 'denied';
+    const result = await OneSignal.Notifications.requestPermission();
+    return result ? 'granted' : 'default';
   } catch (err) {
-    console.error('OneSignal init error:', err);
+    console.warn('Permission request error:', err);
+    return 'error';
   }
 };
 
-// ─────────────────────────────────────────────
-// Link logged-in user to OneSignal
-// ─────────────────────────────────────────────
 export const setOneSignalUser = async (uid, name, email) => {
   try {
-    // Request permission
-    await OneSignal.Notifications.requestPermission();
+    // Wait for init but never block auth
+    if (initPromise) {
+      await Promise.race([
+        initPromise,
+        new Promise(resolve => setTimeout(resolve, 3000))
+      ]);
+    }
 
-    // Link Firebase UID as OneSignal External User ID
+    // If still not initialized (blocked), silently skip
+    if (!initialized) {
+      console.warn('⚠️ OneSignal not available — skipping push setup');
+      return;
+    }
+
+    await requestNotificationPermission();
     await OneSignal.login(uid);
-
-    // Set user tags for targeting
     await OneSignal.User.addTags({
       uid,
       name:  name  || '',
       email: email || '',
     });
-
     console.log('✅ OneSignal user set:', uid);
   } catch (err) {
-    console.error('OneSignal user set error:', err);
+    // NEVER block auth flow
+    console.warn('⚠️ OneSignal user setup skipped:', err?.message);
   }
 };
 
-// ─────────────────────────────────────────────
-// Logout OneSignal when user logs out
-// ─────────────────────────────────────────────
 export const logoutOneSignal = async () => {
   try {
+    if (!initialized) return;
     await OneSignal.logout();
-    console.log('✅ OneSignal logged out');
-  } catch (err) {
-    console.error('OneSignal logout error:', err);
+  } catch {
+    // ignore
   }
 };
 
-// ─────────────────────────────────────────────
-// Send push notification to a SPECIFIC user
-// Uses OneSignal REST API via fetch
-// ─────────────────────────────────────────────
+const callNotificationAPI = async (payload) => {
+  try {
+    const response = await fetch('/api/send-notification', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await response.json();
+    if (data.error) console.warn('❌ Notification error:', data.error);
+    else console.log('✅ Push sent! ID:', data.id);
+    return data;
+  } catch (err) {
+    console.warn('❌ API call failed:', err?.message);
+  }
+};
+
 export const sendPushToUser = async (targetUid, title, message, url = '/dashboard') => {
-  try {
-    const response = await fetch('https://onesignal.com/api/v1/notifications', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        // REST API key — only use from backend ideally
-        // For client side: use public REST API key (read-only safe)
-        'Authorization': `Basic ${import.meta.env.VITE_ONESIGNAL_REST_KEY}`,
-      },
-      body: JSON.stringify({
-        app_id:             import.meta.env.VITE_ONESIGNAL_APP_ID,
-        include_aliases:    { external_id: [targetUid] },
-        target_channel:     'push',
-        headings:           { en: title },
-        contents:           { en: message },
-        url:                `${window.location.origin}${url}`,
-        web_url:            `${window.location.origin}${url}`,
-        chrome_web_icon:    `${window.location.origin}/vite.svg`,
-        small_icon:         'vite',
-      }),
-    });
-
-    const data = await response.json();
-    if (data.errors) {
-      console.error('OneSignal push error:', data.errors);
-    } else {
-      console.log('✅ Push sent to:', targetUid);
-    }
-  } catch (err) {
-    console.error('Push send error:', err);
-  }
+  return callNotificationAPI({
+    targetUid,
+    title,
+    message,
+    url: `${window.location.origin}${url}`,
+  });
 };
 
-// ─────────────────────────────────────────────
-// Send push notification to ALL employees
-// ─────────────────────────────────────────────
 export const sendPushToAll = async (title, message, url = '/dashboard', excludeUid = null) => {
-  try {
-    const body = {
-      app_id:           import.meta.env.VITE_ONESIGNAL_APP_ID,
-      included_segments: ['All'],
-      headings:         { en: title },
-      contents:         { en: message },
-      url:              `${window.location.origin}${url}`,
-      web_url:          `${window.location.origin}${url}`,
-      chrome_web_icon:  `${window.location.origin}/vite.svg`,
-    };
-
-    // Exclude the admin who triggered it
-    if (excludeUid) {
-      body.excluded_aliases = { external_id: [excludeUid] };
-    }
-
-    const response = await fetch('https://onesignal.com/api/v1/notifications', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Basic ${import.meta.env.VITE_ONESIGNAL_REST_KEY}`,
-      },
-      body: JSON.stringify(body),
-    });
-
-    const data = await response.json();
-    if (data.errors) {
-      console.error('OneSignal broadcast error:', data.errors);
-    } else {
-      console.log('✅ Broadcast push sent');
-    }
-  } catch (err) {
-    console.error('Broadcast push error:', err);
-  }
+  return callNotificationAPI({
+    targetAll: true,
+    excludeUid,
+    title,
+    message,
+    url: `${window.location.origin}${url}`,
+  });
 };
