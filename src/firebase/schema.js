@@ -19,7 +19,55 @@ Document ID: uid (from Firebase Auth)
   createdAt: timestamp,
   updatedAt: timestamp
 }
+COLLECTION: activity_logs
+{
+  employeeId: string,
+  employeeName: string,
+  type: "check_in" | "check_out" | "task_assigned" | "task_completed" | "leave_requested" | "focus_start" | "focus_stop",
+  message: string,
+  metadata: object,
+  createdAt: timestamp
+}
 
+COLLECTION: announcements
+{
+  title: string,
+  message: string,
+  createdBy: string,
+  createdByName: string,
+  isPinned: boolean,
+  createdAt: timestamp,
+  updatedAt: timestamp
+}
+
+COLLECTION: team_groups
+{
+  name: string,
+  link: string,
+  description: string,
+  createdBy: string,
+  createdAt: timestamp
+}
+
+COLLECTION: focus_sessions
+{
+  employeeId: string,
+  employeeName: string,
+  taskId: string | null,
+  focusStartTime: timestamp,
+  focusEndTime: timestamp | null,
+  focusDuration: number,  // in minutes
+  date: string,           // "YYYY-MM-DD"
+  createdAt: timestamp
+}
+
+EMPLOYEES collection — add these fields:
+{
+  streak: number,          // current attendance streak
+  lastSeen: timestamp,     // for online/offline
+  isOnline: boolean,
+  focusMinutesToday: number
+}
 COLLECTION: attendance
 Document ID: auto-generated
 {

@@ -11,6 +11,8 @@ import LeavePage from './pages/LeavePage';
 import LeaderboardPage from './pages/LeaderboardPage';
 import ProfilePage from './pages/ProfilePage';
 import AdminPage from './pages/AdminPage';
+import AnnouncementsPage from './pages/AnnouncementsPage';
+import TeamGroupsPage from './pages/TeamGroupsPage';
 
 function ProtectedRoute({ children, adminOnly = false }) {
   const { currentUser, userProfile } = useAuth();
@@ -32,7 +34,11 @@ function AppRoutes() {
         <Route path="leave" element={<LeavePage />} />
         <Route path="leaderboard" element={<LeaderboardPage />} />
         <Route path="profile" element={<ProfilePage />} />
-        <Route path="admin" element={<ProtectedRoute adminOnly><AdminPage /></ProtectedRoute>} />
+        <Route path="announcements" element={<AnnouncementsPage />} />
+        <Route path="groups" element={<TeamGroupsPage />} />
+        <Route path="admin" element={
+          <ProtectedRoute adminOnly><AdminPage /></ProtectedRoute>
+        } />
       </Route>
       <Route path="*" element={<Navigate to="/dashboard" />} />
     </Routes>
@@ -45,13 +51,16 @@ export default function App() {
       <AuthProvider>
         <NotificationProvider>
           <AppRoutes />
-          <Toaster position="top-right" toastOptions={{
-            style: {
-              background: '#1a1d2e', color: '#fff',
-              border: '1px solid rgba(255,255,255,0.08)',
-              borderRadius: '12px', fontFamily: 'Sora, sans-serif', fontSize: '14px'
-            }
-          }} />
+          <Toaster
+            position="top-right"
+            toastOptions={{
+              style: {
+                background: '#1a1d2e', color: '#fff',
+                border: '1px solid rgba(255,255,255,0.08)',
+                borderRadius: '12px', fontFamily: 'Sora, sans-serif', fontSize: '14px'
+              }
+            }}
+          />
         </NotificationProvider>
       </AuthProvider>
     </BrowserRouter>
