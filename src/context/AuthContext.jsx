@@ -8,14 +8,14 @@ import {
 } from 'firebase/auth';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db, googleProvider } from '../firebase/config';
-import { setOneSignalUser, logoutOneSignal } from '../services/oneSignalService';
+import { initPushNotifications, logoutPush } from '../services/pushService';
 
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
   const [currentUser, setCurrentUser]   = useState(null);
   const [userProfile, setUserProfile]   = useState(null);
-  const [loading, setLoading]           = useState(true);  // ← KEY FIX
+  const [loading, setLoading]           = useState(true);
 
   const login = (email, password) =>
     signInWithEmailAndPassword(auth, email, password);
@@ -24,26 +24,30 @@ export function AuthProvider({ children }) {
     signInWithPopup(auth, googleProvider);
 
   const logout = async () => {
-    await logoutOneSignal();
+    // Fire and forget — never block logout
+    if (currentUser) {
+      logoutPush(currentUser.uid).catch(() => {});
+    }
     return signOut(auth);
   };
 
   const register = async (email, password, name, role = 'employee') => {
     const cred = await createUserWithEmailAndPassword(auth, email, password);
     await setDoc(doc(db, 'employees', cred.user.uid), {
-      uid:              cred.user.uid,
+      uid:               cred.user.uid,
       name,
       email,
       role,
-      department:       'General',
-      photoURL:         '',
-      joinDate:         serverTimestamp(),
-      isActive:         true,
+      department:        'General',
+      photoURL:          '',
+      joinDate:          serverTimestamp(),
+      isActive:          true,
       productivityScore: 0,
-      streak:           0,
-      isOnline:         false,
-      createdAt:        serverTimestamp(),
-      updatedAt:        serverTimestamp()
+      streak:            0,
+      isOnline:          false,
+      pushSubscription:  null,
+      createdAt:         serverTimestamp(),
+      updatedAt:         serverTimestamp()
     });
     return cred;
   };
@@ -59,54 +63,55 @@ export function AuthProvider({ children }) {
   };
 
   useEffect(() => {
-  const unsub = onAuthStateChanged(auth, async (user) => {
-    try {
-      if (user) {
-        setCurrentUser(user);
-        const snap = await getDoc(doc(db, 'employees', user.uid));
+    const unsub = onAuthStateChanged(auth, async (user) => {
+      try {
+        if (user) {
+          setCurrentUser(user);
 
-        if (snap.exists()) {
-          setUserProfile(snap.data());
+          const snap = await getDoc(doc(db, 'employees', user.uid));
+
+          if (snap.exists()) {
+            setUserProfile(snap.data());
+          } else {
+            const profile = {
+              uid:               user.uid,
+              name:              user.displayName || 'User',
+              email:             user.email,
+              role:              'employee',
+              department:        'General',
+              photoURL:          user.photoURL || '',
+              joinDate:          serverTimestamp(),
+              isActive:          true,
+              productivityScore: 0,
+              streak:            0,
+              isOnline:          false,
+              pushSubscription:  null,
+              createdAt:         serverTimestamp(),
+              updatedAt:         serverTimestamp()
+            };
+            await setDoc(doc(db, 'employees', user.uid), profile);
+            setUserProfile(profile);
+          }
+
+          // ✅ Fire and forget — auth ko kabhi block nahi karega
+          initPushNotifications(user.uid).catch(() => {});
+
         } else {
-          const profile = {
-            uid:               user.uid,
-            name:              user.displayName || 'User',
-            email:             user.email,
-            role:              'employee',
-            department:        'General',
-            photoURL:          user.photoURL || '',
-            joinDate:          serverTimestamp(),
-            isActive:          true,
-            productivityScore: 0,
-            streak:            0,
-            isOnline:          false,
-            createdAt:         serverTimestamp(),
-            updatedAt:         serverTimestamp()
-          };
-          await setDoc(doc(db, 'employees', user.uid), profile);
-          setUserProfile(profile);
+          setCurrentUser(null);
+          setUserProfile(null);
         }
-
-        // ✅ Fire and forget — auth ko kabhi block nahi karega
-        setOneSignalUser(user.uid, user.displayName, user.email).catch(() => {});
-
-      } else {
+      } catch (err) {
+        console.error('Auth state error:', err);
         setCurrentUser(null);
         setUserProfile(null);
-        logoutOneSignal().catch(() => {});
+      } finally {
+        // ✅ Always runs — app never gets stuck
+        setLoading(false);
       }
-    } catch (err) {
-      console.error('Auth state error:', err);
-      setCurrentUser(null);
-      setUserProfile(null);
-    } finally {
-      // ✅ Ye HAMESHA chalega — OneSignal ka wait nahi
-      setLoading(false);
-    }
-  });
+    });
 
-  return unsub;
-}, []);
+    return unsub;
+  }, []);
 
   return (
     <AuthContext.Provider value={{

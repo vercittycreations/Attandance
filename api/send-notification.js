@@ -1,94 +1,90 @@
-export default async function handler(req, res) {
-  // CORS
-  res.setHeader('Access-Control-Allow-Credentials', true);
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+const webpush = require('web-push');
 
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
+webpush.setVapidDetails(
+  process.env.VAPID_EMAIL,
+  process.env.VITE_VAPID_PUBLIC_KEY,
+  process.env.VAPID_PRIVATE_KEY
+);
 
-  if (req.method !== 'POST') {
+const admin = require('firebase-admin');
+
+// Init Firebase Admin only once
+if (!admin.apps.length) {
+  admin.initializeApp({
+    credential: admin.credential.cert({
+      projectId:   process.env.FIREBASE_PROJECT_ID,
+      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+      privateKey:  process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+    }),
+  });
+}
+
+module.exports = async function handler(req, res) {
+  res.setHeader('Access-Control-Allow-Origin',  '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  if (req.method === 'OPTIONS') return res.status(200).end();
+  if (req.method !== 'POST')
     return res.status(405).json({ error: 'Method not allowed' });
-  }
 
-  // Body parse check
-  let body = req.body;
-  if (!body) {
-    return res.status(400).json({ error: 'Empty body' });
-  }
+  const { targetUid, targetAll, excludeUid, title, message, url } = req.body || {};
 
-  const { targetUid, targetAll, excludeUid, title, message, url } = body;
-
-  if (!title || !message) {
+  if (!title || !message)
     return res.status(400).json({ error: 'title and message required' });
-  }
 
-  const appId   = process.env.VITE_ONESIGNAL_APP_ID;
-  const restKey = process.env.VITE_ONESIGNAL_REST_KEY;
-
-  if (!appId || !restKey) {
-    console.error('Missing env vars:', { appId: !!appId, restKey: !!restKey });
-    return res.status(500).json({ error: 'OneSignal env vars missing' });
-  }
+  const db = admin.firestore();
+  const payload = JSON.stringify({ title, body: message, url, icon: '/vite.svg' });
 
   try {
-    let payload = {
-      app_id:          appId,
-      headings:        { en: title },
-      contents:        { en: message },
-      url:             url || 'https://attandance-rho.vercel.app/dashboard',
-      web_url:         url || 'https://attandance-rho.vercel.app/dashboard',
-      chrome_web_icon: 'https://attandance-rho.vercel.app/vite.svg',
-    };
-
     if (targetAll) {
-      payload.included_segments = ['All'];
-      if (excludeUid) {
-        payload.excluded_aliases = { external_id: [excludeUid] };
-      }
+      // Get all active employees with push subscription
+      const snap = await db.collection('employees')
+        .where('isActive', '==', true)
+        .get();
+
+      const results = [];
+      await Promise.all(
+        snap.docs
+          .filter(d => {
+            const data = d.data();
+            return data.pushSubscription && d.id !== excludeUid;
+          })
+          .map(async (d) => {
+            try {
+              await webpush.sendNotification(d.data().pushSubscription, payload);
+              results.push({ uid: d.id, success: true });
+            } catch (err) {
+              // Subscription expired — clean up
+              if (err.statusCode === 410) {
+                await d.ref.update({ pushSubscription: null });
+              }
+              results.push({ uid: d.id, success: false });
+            }
+          })
+      );
+
+      const sent = results.filter(r => r.success).length;
+      return res.status(200).json({ success: true, sent, total: results.length });
+
     } else if (targetUid) {
-      payload.include_aliases = { external_id: [targetUid] };
-      payload.target_channel  = 'push';
+      const empDoc = await db.collection('employees').doc(targetUid).get();
+      if (!empDoc.exists)
+        return res.status(404).json({ error: 'Employee not found' });
+
+      const sub = empDoc.data()?.pushSubscription;
+      if (!sub)
+        return res.status(400).json({ error: 'No push subscription for this user' });
+
+      await webpush.sendNotification(sub, payload);
+      return res.status(200).json({ success: true });
+
     } else {
       return res.status(400).json({ error: 'targetUid or targetAll required' });
     }
 
-    console.log('Sending to OneSignal:', JSON.stringify(payload));
-
-    const response = await fetch('https://onesignal.com/api/v1/notifications', {
-      method: 'POST',
-      headers: {
-        'Content-Type':  'application/json',
-        'Authorization': `Basic ${restKey}`,
-      },
-      body: JSON.stringify(payload),
-    });
-
-    const text = await response.text();
-    console.log('OneSignal raw response:', text);
-
-    let data;
-    try {
-      data = JSON.parse(text);
-    } catch {
-      return res.status(500).json({ error: 'Invalid JSON from OneSignal', raw: text });
-    }
-
-    if (data.errors) {
-      console.error('OneSignal errors:', data.errors);
-      return res.status(400).json({ error: data.errors });
-    }
-
-    return res.status(200).json({
-      success:    true,
-      id:         data.id,
-      recipients: data.recipients
-    });
-
   } catch (err) {
-    console.error('Handler error:', err);
+    console.error('Push error:', err);
     return res.status(500).json({ error: err.message });
   }
-}
+};
