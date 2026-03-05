@@ -125,3 +125,8 @@ export const logoutPush = async (uid) => {
     console.warn('Logout push error:', err?.message);
   }
 };
+
+
+console.log('VAPID key exists:', !!VAPID_PUBLIC_KEY);
+console.log('VAPID key length:', VAPID_PUBLIC_KEY?.length);
+console.log('VAPID key starts with B:', VAPID_PUBLIC_KEY?.startsWith('B'));
