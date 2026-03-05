@@ -11,7 +11,47 @@ export const initOneSignal = async () => {
   const timeout = new Promise((resolve) =>
     setTimeout(() => resolve('timeout'), 3000)
   );
+const callNotificationAPI = async (payload) => {
+  try {
+    const response = await fetch('/api/send-notification', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
 
+    // Check if response is ok first
+    if (!response.ok) {
+      const text = await response.text();
+      console.warn('❌ API error:', response.status, text);
+      return null;
+    }
+
+    const text = await response.text();
+    if (!text) {
+      console.warn('❌ Empty response from API');
+      return null;
+    }
+
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      console.warn('❌ Invalid JSON response:', text);
+      return null;
+    }
+
+    if (data.error) {
+      console.warn('❌ Notification error:', data.error);
+    } else {
+      console.log('✅ Push sent! ID:', data.id, '| Recipients:', data.recipients);
+    }
+
+    return data;
+  } catch (err) {
+    console.warn('❌ API call failed:', err?.message);
+    return null;
+  }
+};
   const init = OneSignal.init({
     appId: import.meta.env.VITE_ONESIGNAL_APP_ID,
     notifyButton: { enable: false },
