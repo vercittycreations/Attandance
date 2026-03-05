@@ -22,32 +22,53 @@ function urlBase64ToUint8Array(base64String) {
 export const initPushNotifications = async (uid) => {
   try {
     if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
-      console.warn('Push not supported');
+      console.warn('Push not supported in this browser');
       return null;
     }
+
+    // Check VAPID key
+    if (!VAPID_PUBLIC_KEY) {
+      console.error('❌ VITE_VAPID_PUBLIC_KEY is missing!');
+      return null;
+    }
+
+    console.log('🔑 VAPID key:', VAPID_PUBLIC_KEY.slice(0, 20) + '...');
 
     // Register SW
     const registration = await navigator.serviceWorker.register('/sw.js', {
       scope: '/'
     });
-    console.log('✅ SW registered');
+    await navigator.serviceWorker.ready;
+    console.log('✅ SW registered and ready');
 
-    // Request permission
+    // Check permission
     const permission = await Notification.requestPermission();
-    if (permission !== 'granted') {
-      console.warn('Notification permission:', permission);
-      return null;
+    console.log('🔔 Permission:', permission);
+    if (permission !== 'granted') return null;
+
+    // Check existing subscription first
+    let subscription = await registration.pushManager.getSubscription();
+
+    if (subscription) {
+      console.log('✅ Already subscribed');
+    } else {
+      // New subscription
+      try {
+        subscription = await registration.pushManager.subscribe({
+          userVisibleOnly:      true,
+          applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+        });
+        console.log('✅ New subscription created');
+      } catch (subErr) {
+        console.error('❌ Subscribe error:', subErr.message);
+        // Common errors:
+        // "Registration failed - push service error" = VAPID key wrong format
+        // "Permission denied" = user blocked notifications
+        return null;
+      }
     }
 
-    // Subscribe to push
-    const subscription = await registration.pushManager.subscribe({
-      userVisibleOnly:      true,
-      applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
-    });
-
-    console.log('✅ Push subscribed');
-
-    // Save subscription to Firestore
+    // Save to Firestore
     const { doc, updateDoc, serverTimestamp } = await import('firebase/firestore');
     const { db } = await import('../firebase/config');
 
@@ -57,7 +78,7 @@ export const initPushNotifications = async (uid) => {
       pushUpdatedAt:    serverTimestamp()
     });
 
-    console.log('✅ Subscription saved to Firestore');
+    console.log('✅ Subscription saved!');
     return subData;
 
   } catch (err) {
