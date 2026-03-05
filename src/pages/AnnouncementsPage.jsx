@@ -9,7 +9,7 @@ import {
 import { logActivity } from '../services/activityService';
 import { useNotifications } from '../context/NotificationContext';
 import { getAllEmployees } from '../services/employeeService';
-import { sendPushToAll } from '../services/oneSignalService';
+import { sendPushToAll } from '../services/pushService';
 import Modal from '../components/common/Modal';
 import {
   Megaphone, Plus, Pin, Edit2,
@@ -49,16 +49,12 @@ export default function AnnouncementsPage() {
     setSubmitting(true);
     try {
       if (editItem) {
-        // ── UPDATE ──
         await updateAnnouncement(editItem.id, {
           title: form.title,
           message: form.message
         });
         toast.success('Announcement updated!');
-
       } else {
-        // ── CREATE ──
-
         // 1. Save to Firestore
         await createAnnouncement({
           title: form.title,
@@ -67,7 +63,7 @@ export default function AnnouncementsPage() {
           createdByName: userProfile?.name
         });
 
-        // 2. Activity timeline log
+        // 2. Activity timeline
         await logActivity(
           currentUser.uid,
           userProfile?.name,
@@ -76,17 +72,17 @@ export default function AnnouncementsPage() {
           { type: 'announcement', title: form.title }
         );
 
-        // 3. OneSignal browser push to ALL employees
-        await sendPushToAll(
+        // 3. Browser push to all (Web Push API)
+        sendPushToAll(
           `📢 ${form.title}`,
           form.message.length > 100
             ? form.message.slice(0, 100) + '...'
             : form.message,
           '/announcements',
-          currentUser.uid  // exclude admin who posted
-        );
+          currentUser.uid
+        ).catch(() => {});
 
-        // 4. In-app bell notification to all employees
+        // 4. In-app bell notification
         try {
           const employees = await getAllEmployees();
           const others = employees.filter(
@@ -192,10 +188,7 @@ export default function AnnouncementsPage() {
             <Megaphone size={36} className="text-white/10 mx-auto mb-3" />
             <p className="text-sm font-medium text-white/30">No announcements yet</p>
             {isAdmin && (
-              <button
-                onClick={() => setShowModal(true)}
-                className="btn-primary mt-4 text-sm"
-              >
+              <button onClick={() => setShowModal(true)} className="btn-primary mt-4 text-sm">
                 Post first update
               </button>
             )}
@@ -212,8 +205,6 @@ export default function AnnouncementsPage() {
           >
             <div className="flex items-start justify-between gap-3">
               <div className="flex-1 min-w-0">
-
-                {/* Pinned badge + title */}
                 <div className="flex items-center gap-2 mb-1.5 flex-wrap">
                   {item.isPinned && (
                     <span className="inline-flex items-center gap-1 text-xs text-brand-400 bg-brand-500/10 px-2 py-0.5 rounded-full border border-brand-500/20">
@@ -224,13 +215,9 @@ export default function AnnouncementsPage() {
                     {item.title}
                   </h3>
                 </div>
-
-                {/* Message */}
                 <p className="text-sm text-white/60 leading-relaxed whitespace-pre-wrap break-words">
                   {item.message}
                 </p>
-
-                {/* Footer */}
                 <div className="flex items-center gap-3 mt-3 flex-wrap">
                   <div className="flex items-center gap-1.5 text-xs text-white/25">
                     <Calendar size={11} />
@@ -244,7 +231,6 @@ export default function AnnouncementsPage() {
                 </div>
               </div>
 
-              {/* Admin action buttons */}
               {isAdmin && (
                 <div className="flex items-center gap-1.5 flex-shrink-0 mt-0.5">
                   <button
@@ -277,15 +263,13 @@ export default function AnnouncementsPage() {
         ))}
       </div>
 
-      {/* Post / Edit Modal */}
+      {/* Modal */}
       <Modal
         isOpen={showModal}
         onClose={closeModal}
         title={editItem ? 'Edit Announcement' : 'Post Company Update'}
       >
         <div className="space-y-4">
-
-          {/* Info banner — only on new post */}
           {!editItem && (
             <div className="flex items-start gap-2 p-3 bg-brand-500/10 border border-brand-500/20 rounded-xl">
               <Bell size={14} className="text-brand-400 flex-shrink-0 mt-0.5" />
@@ -295,7 +279,6 @@ export default function AnnouncementsPage() {
               </p>
             </div>
           )}
-
           <div>
             <label className="block text-xs font-medium text-white/50 mb-1.5 uppercase tracking-wider">
               Title *
@@ -309,7 +292,6 @@ export default function AnnouncementsPage() {
               autoFocus
             />
           </div>
-
           <div>
             <label className="block text-xs font-medium text-white/50 mb-1.5 uppercase tracking-wider">
               Message *
@@ -323,11 +305,8 @@ export default function AnnouncementsPage() {
             />
             <p className="text-xs text-white/20 mt-1">{form.message.length} characters</p>
           </div>
-
           <div className="flex gap-3 pt-2">
-            <button onClick={closeModal} className="btn-secondary flex-1">
-              Cancel
-            </button>
+            <button onClick={closeModal} className="btn-secondary flex-1">Cancel</button>
             <button
               onClick={handleSubmit}
               disabled={submitting}

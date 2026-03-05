@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { getAllLeaves, reviewLeave } from '../../services/leaveService';
 import { useAuth } from '../../context/AuthContext';
 import { useNotifications } from '../../context/NotificationContext';
-import { sendPushToUser } from '../../services/oneSignalService';
+import { sendPushToUser } from '../../services/pushService';
 import { PageLoader } from '../common/LoadingSpinner';
 import { CheckCircle, XCircle, Calendar } from 'lucide-react';
 import { format } from 'date-fns';
@@ -40,15 +40,15 @@ export default function AdminLeaves() {
       // 1. Update Firestore
       await reviewLeave(leave.id, status, currentUser.uid);
 
-      // 2. OneSignal browser push to employee
-      await sendPushToUser(
+      // 2. Browser push (Web Push API) — fire and forget
+      sendPushToUser(
         leave.employeeId,
         status === 'approved' ? '✅ Leave Approved!' : '❌ Leave Rejected',
         `Your leave request for ${leave.date} has been ${status}.`,
         '/leave'
-      );
+      ).catch(() => {});
 
-      // 3. In-app bell notification (Firestore)
+      // 3. In-app bell notification
       await createNotification(
         leave.employeeId,
         `Leave Request ${status === 'approved' ? 'Approved' : 'Rejected'}`,
@@ -116,46 +116,30 @@ export default function AdminLeaves() {
           <div key={leave.id} className="card p-5">
             <div className="flex items-start justify-between gap-4 flex-wrap">
               <div className="flex-1 min-w-0">
-
-                {/* Employee + Leave type */}
                 <div className="flex items-center gap-2 mb-1 flex-wrap">
-                  <p className="text-sm font-semibold text-white">
-                    {leave.employeeName}
-                  </p>
+                  <p className="text-sm font-semibold text-white">{leave.employeeName}</p>
                   <span className="badge bg-white/5 text-white/50">
                     {leaveTypeLabels[leave.leaveType] || leave.leaveType}
                   </span>
                 </div>
-
-                {/* Date */}
                 <div className="flex items-center gap-1.5 text-xs text-white/40 mb-2">
                   <Calendar size={11} />
                   {leave.date}
                 </div>
-
-                {/* Reason */}
-                <p className="text-sm text-white/60 leading-relaxed">
-                  {leave.reason}
-                </p>
-
-                {/* Submitted at */}
+                <p className="text-sm text-white/60 leading-relaxed">{leave.reason}</p>
                 <p className="text-xs text-white/20 mt-2">
                   Submitted:{' '}
                   {leave.createdAt?.toDate
                     ? format(leave.createdAt.toDate(), 'MMM d, yyyy • HH:mm')
                     : '—'}
                 </p>
-
-                {/* Reviewed info */}
                 {leave.status !== 'pending' && leave.reviewedAt?.toDate && (
                   <p className="text-xs text-white/20 mt-0.5">
-                    Reviewed:{' '}
-                    {format(leave.reviewedAt.toDate(), 'MMM d, yyyy • HH:mm')}
+                    Reviewed: {format(leave.reviewedAt.toDate(), 'MMM d, yyyy • HH:mm')}
                   </p>
                 )}
               </div>
 
-              {/* Action buttons / Status badge */}
               <div className="flex items-center gap-2 flex-shrink-0">
                 {leave.status === 'pending' ? (
                   <>

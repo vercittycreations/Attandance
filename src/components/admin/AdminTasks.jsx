@@ -3,7 +3,7 @@ import { getAllTasks, createTask, deleteTask } from '../../services/taskService'
 import { getAllEmployees } from '../../services/employeeService';
 import { useAuth } from '../../context/AuthContext';
 import { useNotifications } from '../../context/NotificationContext';
-import { sendPushToUser } from '../../services/oneSignalService';
+import { sendPushToUser } from '../../services/pushService';
 import Modal from '../common/Modal';
 import { PageLoader } from '../common/LoadingSpinner';
 import { Plus, Search, Trash2, AlertCircle } from 'lucide-react';
@@ -44,25 +44,24 @@ export default function AdminTasks() {
       const emp = employees.find(
         e => e.uid === form.assignedTo || e.id === form.assignedTo
       );
-
       const { Timestamp } = await import('firebase/firestore');
 
       await createTask({
         ...form,
         assignedToName: emp?.name || '',
-        assignedBy: currentUser.uid,
-        deadline: Timestamp.fromDate(new Date(form.deadline))
+        assignedBy:     currentUser.uid,
+        deadline:       Timestamp.fromDate(new Date(form.deadline))
       });
 
-      // ✅ OneSignal browser push
-      await sendPushToUser(
+      // Browser push (Web Push API)
+      sendPushToUser(
         form.assignedTo,
         '✅ New Task Assigned',
         `You have a new task: "${form.title}"`,
         '/tasks'
-      );
+      ).catch(() => {});
 
-      // ✅ In-app bell notification (Firestore)
+      // In-app bell notification
       await createNotification(
         form.assignedTo,
         'New Task Assigned',
@@ -106,7 +105,7 @@ export default function AdminTasks() {
   return (
     <div className="space-y-4">
 
-      {/* Filters + Add button */}
+      {/* Filters + Add */}
       <div className="flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1">
           <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/30" />
@@ -170,7 +169,9 @@ export default function AdminTasks() {
                   <p className="text-xs text-white/40 mt-1.5 line-clamp-2">{task.description}</p>
                 )}
                 {task.deadline?.toDate && (
-                  <div className={`flex items-center gap-1.5 mt-2 text-xs ${isOverdue ? 'text-red-400' : 'text-white/30'}`}>
+                  <div className={`flex items-center gap-1.5 mt-2 text-xs ${
+                    isOverdue ? 'text-red-400' : 'text-white/30'
+                  }`}>
                     {isOverdue && <AlertCircle size={11} />}
                     Due: {format(task.deadline.toDate(), 'MMM d, yyyy')}
                     {isOverdue && <span className="font-semibold ml-1">— Overdue</span>}
@@ -208,7 +209,6 @@ export default function AdminTasks() {
               autoFocus
             />
           </div>
-
           <div>
             <label className="block text-xs font-medium text-white/50 mb-1.5 uppercase tracking-wider">
               Description
@@ -221,7 +221,6 @@ export default function AdminTasks() {
               rows={3}
             />
           </div>
-
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-medium text-white/50 mb-1.5 uppercase tracking-wider">
@@ -249,7 +248,6 @@ export default function AdminTasks() {
               />
             </div>
           </div>
-
           <div>
             <label className="block text-xs font-medium text-white/50 mb-1.5 uppercase tracking-wider">
               Assign To *
@@ -261,17 +259,12 @@ export default function AdminTasks() {
             >
               <option value="" className="bg-surface-800">Select employee...</option>
               {employees.map(e => (
-                <option
-                  key={e.id}
-                  value={e.uid || e.id}
-                  className="bg-surface-800"
-                >
+                <option key={e.id} value={e.uid || e.id} className="bg-surface-800">
                   {e.name} — {e.department}
                 </option>
               ))}
             </select>
           </div>
-
           <div className="flex gap-3 pt-2">
             <button
               onClick={() => { setShowAdd(false); setForm(emptyForm); }}
