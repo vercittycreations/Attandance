@@ -5,7 +5,7 @@ import {
 } from 'firebase/auth';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db, googleProvider } from '../firebase/config';
-
+import { setOneSignalUser, logoutOneSignal } from '../services/oneSignalService';
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
@@ -28,29 +28,46 @@ export function AuthProvider({ children }) {
   };
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (user) => {
-      setCurrentUser(user);
-      if (user) {
-        const snap = await getDoc(doc(db, 'employees', user.uid));
-        if (snap.exists()) {
-          setUserProfile(snap.data());
-        } else {
-          const profile = {
-            uid: user.uid, name: user.displayName || 'User', email: user.email,
-            role: 'employee', department: 'General', photoURL: user.photoURL || '',
-            joinDate: serverTimestamp(), isActive: true, productivityScore: 0,
-            createdAt: serverTimestamp(), updatedAt: serverTimestamp()
-          };
-          await setDoc(doc(db, 'employees', user.uid), profile);
-          setUserProfile(profile);
-        }
+  const unsub = onAuthStateChanged(auth, async (user) => {
+    setCurrentUser(user);
+    if (user) {
+      const snap = await getDoc(doc(db, 'employees', user.uid));
+      if (snap.exists()) {
+        const profile = snap.data();
+        setUserProfile(profile);
+
+        // ✅ Link user to OneSignal
+        await setOneSignalUser(user.uid, profile.name, profile.email);
+
       } else {
-        setUserProfile(null);
+        const profile = {
+          uid: user.uid,
+          name: user.displayName || 'User',
+          email: user.email,
+          role: 'employee',
+          department: 'General',
+          photoURL: user.photoURL || '',
+          joinDate: serverTimestamp(),
+          isActive: true,
+          productivityScore: 0,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        };
+        await setDoc(doc(db, 'employees', user.uid), profile);
+        setUserProfile(profile);
+
+        // ✅ Link new user to OneSignal
+        await setOneSignalUser(user.uid, profile.name, profile.email);
       }
-      setLoading(false);
-    });
-    return unsub;
-  }, []);
+    } else {
+      setUserProfile(null);
+      // ✅ Logout OneSignal when user logs out
+      await logoutOneSignal();
+    }
+    setLoading(false);
+  });
+  return unsub;
+}, []);
 
   const refreshProfile = async () => {
     if (currentUser) {

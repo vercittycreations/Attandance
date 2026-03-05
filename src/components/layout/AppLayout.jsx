@@ -3,13 +3,12 @@ import { Outlet } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import Topbar from './Topbar';
 import { usePresence } from '../../hooks/usePresence';
-import { useFCM } from '../../hooks/useFCM';
+
+// useFCM removed — OneSignal handles push now
 
 export default function AppLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-
-  usePresence();  // Online/offline tracking
-  useFCM();       // Push notification permission + listener
+  usePresence();
 
   return (
     <div className="flex h-screen overflow-hidden bg-surface-950">
