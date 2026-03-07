@@ -8,6 +8,9 @@
   body {
     @apply bg-surface-950 text-white font-sans;
     -webkit-font-smoothing: antialiased;
+    /* ✅ Android safe area */
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
   }
   ::-webkit-scrollbar { width: 6px; height: 6px; }
   ::-webkit-scrollbar-track { @apply bg-surface-900; }
