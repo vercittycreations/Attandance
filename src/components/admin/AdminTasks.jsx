@@ -1,29 +1,50 @@
 import { useEffect, useState } from 'react';
-import { getAllTasks, createTask, deleteTask } from '../../services/taskService';
+import { getAllTasks, createTask, deleteTask, updateTaskStatus } from '../../services/taskService';
 import { getAllEmployees } from '../../services/employeeService';
 import { useAuth } from '../../context/AuthContext';
 import { useNotifications } from '../../context/NotificationContext';
 import { sendPushToUser } from '../../services/pushService';
 import Modal from '../common/Modal';
 import { PageLoader } from '../common/LoadingSpinner';
-import { Plus, Search, Trash2, AlertCircle } from 'lucide-react';
+import {
+  Plus, Search, Trash2, AlertCircle,
+  Clock, CheckCircle2, PlayCircle, ChevronRight, User
+} from 'lucide-react';
 import { format, isPast } from 'date-fns';
 import toast from 'react-hot-toast';
 
 const priorities = ['low', 'medium', 'high', 'urgent'];
-const emptyForm = { title: '', description: '', priority: 'medium', deadline: '', assignedTo: '' };
+const emptyForm = {
+  title: '', description: '', priority: 'medium',
+  deadline: '', assignedTo: ''
+};
+
+const STATUS_CONFIG = {
+  pending:     { label: 'Pending',     color: 'text-yellow-400', bg: 'bg-yellow-500/10', border: 'border-yellow-500/20' },
+  in_progress: { label: 'In Progress', color: 'text-blue-400',   bg: 'bg-blue-500/10',   border: 'border-blue-500/20'   },
+  completed:   { label: 'Completed',   color: 'text-emerald-400',bg: 'bg-emerald-500/10',border: 'border-emerald-500/20'},
+};
+
+const PRIORITY_CONFIG = {
+  low:    { color: 'text-slate-400',  bg: 'bg-slate-500/10'  },
+  medium: { color: 'text-blue-400',   bg: 'bg-blue-500/10'   },
+  high:   { color: 'text-orange-400', bg: 'bg-orange-500/10' },
+  urgent: { color: 'text-red-400',    bg: 'bg-red-500/10'    },
+};
 
 export default function AdminTasks() {
   const { currentUser } = useAuth();
   const { createNotification } = useNotifications();
-  const [tasks, setTasks] = useState([]);
-  const [employees, setEmployees] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
+  const [tasks, setTasks]           = useState([]);
+  const [employees, setEmployees]   = useState([]);
+  const [loading, setLoading]       = useState(true);
+  const [search, setSearch]         = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
-  const [showAdd, setShowAdd] = useState(false);
-  const [form, setForm] = useState(emptyForm);
+  const [showAdd, setShowAdd]       = useState(false);
+  const [selectedTask, setSelectedTask] = useState(null); // ← task detail popup
+  const [form, setForm]             = useState(emptyForm);
   const [submitting, setSubmitting] = useState(false);
+  const [updating, setUpdating]     = useState(false);
 
   useEffect(() => { loadData(); }, []);
 
@@ -36,14 +57,12 @@ export default function AdminTasks() {
   };
 
   const handleCreate = async () => {
-    if (!form.title || !form.assignedTo || !form.deadline) {
+    if (!form.title || !form.assignedTo || !form.deadline)
       return toast.error('Fill all required fields');
-    }
+
     setSubmitting(true);
     try {
-      const emp = employees.find(
-        e => e.uid === form.assignedTo || e.id === form.assignedTo
-      );
+      const emp = employees.find(e => e.uid === form.assignedTo || e.id === form.assignedTo);
       const { Timestamp } = await import('firebase/firestore');
 
       await createTask({
@@ -53,7 +72,6 @@ export default function AdminTasks() {
         deadline:       Timestamp.fromDate(new Date(form.deadline))
       });
 
-      // Browser push (Web Push API)
       sendPushToUser(
         form.assignedTo,
         '✅ New Task Assigned',
@@ -61,7 +79,6 @@ export default function AdminTasks() {
         '/tasks'
       ).catch(() => {});
 
-      // In-app bell notification
       await createNotification(
         form.assignedTo,
         'New Task Assigned',
@@ -81,14 +98,35 @@ export default function AdminTasks() {
     }
   };
 
-  const handleDelete = async (taskId) => {
+  const handleDelete = async (taskId, e) => {
+    e.stopPropagation();
     if (!confirm('Delete this task?')) return;
     try {
       await deleteTask(taskId);
       toast.success('Task deleted');
+      setSelectedTask(null);
       loadData();
     } catch {
       toast.error('Failed to delete');
+    }
+  };
+
+  const handleStatusChange = async (task, newStatus) => {
+    setUpdating(true);
+    try {
+      await updateTaskStatus(task.id, newStatus);
+      // Update selected task in popup too
+      setSelectedTask(prev => prev ? { ...prev, status: newStatus } : null);
+      setTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: newStatus } : t));
+      toast.success(
+        newStatus === 'in_progress' ? '▶️ Task started!'
+        : newStatus === 'completed' ? '✅ Task completed!'
+        : '↩️ Task reset to pending'
+      );
+    } catch {
+      toast.error('Failed to update status');
+    } finally {
+      setUpdating(false);
     }
   };
 
@@ -136,7 +174,7 @@ export default function AdminTasks() {
         </button>
       </div>
 
-      {/* Task list */}
+      {/* Task List */}
       <div className="space-y-2">
         {filtered.length === 0 ? (
           <div className="card p-12 text-center">
@@ -148,48 +186,176 @@ export default function AdminTasks() {
             isPast(task.deadline.toDate()) &&
             task.status !== 'completed';
 
+          const sc = STATUS_CONFIG[task.status]   || STATUS_CONFIG.pending;
+          const pc = PRIORITY_CONFIG[task.priority] || PRIORITY_CONFIG.medium;
+
           return (
-            <div key={task.id} className="card p-4 flex items-start gap-4">
+            <div
+              key={task.id}
+              onClick={() => setSelectedTask(task)}
+              className="card p-4 flex items-center gap-3 cursor-pointer hover:border-white/15 hover:bg-white/[0.02] active:scale-[0.99] transition-all"
+            >
+              {/* Status dot */}
+              <div className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                task.status === 'completed'  ? 'bg-emerald-400' :
+                task.status === 'in_progress'? 'bg-blue-400' :
+                isOverdue                    ? 'bg-red-400' : 'bg-yellow-400'
+              }`} />
+
+              {/* Content */}
               <div className="flex-1 min-w-0">
-                <div className="flex items-start justify-between gap-2 flex-wrap">
-                  <div>
-                    <p className="text-sm font-semibold text-white">{task.title}</p>
-                    <p className="text-xs text-white/40 mt-0.5">
-                      → <span className="text-white/60">{task.assignedToName}</span>
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className={`badge badge-${task.priority}`}>{task.priority}</span>
-                    <span className={`badge badge-${task.status}`}>
-                      {task.status.replace('_', ' ')}
+                <p className="text-sm font-medium text-white truncate">{task.title}</p>
+                <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                  <span className="text-xs text-white/35 truncate">
+                    → {task.assignedToName}
+                  </span>
+                  {isOverdue && (
+                    <span className="text-xs text-red-400 flex items-center gap-1">
+                      <AlertCircle size={10} /> Overdue
                     </span>
-                  </div>
+                  )}
                 </div>
-                {task.description && (
-                  <p className="text-xs text-white/40 mt-1.5 line-clamp-2">{task.description}</p>
-                )}
-                {task.deadline?.toDate && (
-                  <div className={`flex items-center gap-1.5 mt-2 text-xs ${
-                    isOverdue ? 'text-red-400' : 'text-white/30'
-                  }`}>
-                    {isOverdue && <AlertCircle size={11} />}
-                    Due: {format(task.deadline.toDate(), 'MMM d, yyyy')}
-                    {isOverdue && <span className="font-semibold ml-1">— Overdue</span>}
-                  </div>
-                )}
               </div>
-              <button
-                onClick={() => handleDelete(task.id)}
-                className="text-white/20 hover:text-red-400 transition-colors p-1 flex-shrink-0 mt-0.5"
-              >
-                <Trash2 size={15} />
-              </button>
+
+              {/* Right side */}
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${pc.bg} ${pc.color}`}>
+                  {task.priority}
+                </span>
+                <ChevronRight size={14} className="text-white/20" />
+              </div>
             </div>
           );
         })}
       </div>
 
-      {/* Assign Task Modal */}
+      {/* ─── Task Detail Popup ─── */}
+      <Modal
+        isOpen={!!selectedTask}
+        onClose={() => setSelectedTask(null)}
+        title="Task Details"
+      >
+        {selectedTask && (() => {
+          const sc = STATUS_CONFIG[selectedTask.status] || STATUS_CONFIG.pending;
+          const pc = PRIORITY_CONFIG[selectedTask.priority] || PRIORITY_CONFIG.medium;
+          const isOverdue =
+            selectedTask.deadline?.toDate &&
+            isPast(selectedTask.deadline.toDate()) &&
+            selectedTask.status !== 'completed';
+
+          return (
+            <div className="space-y-5">
+
+              {/* Title */}
+              <div>
+                <h3 className="text-base font-semibold text-white leading-snug">
+                  {selectedTask.title}
+                </h3>
+                {selectedTask.description && (
+                  <p className="text-sm text-white/55 mt-2 leading-relaxed">
+                    {selectedTask.description}
+                  </p>
+                )}
+              </div>
+
+              {/* Info grid */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="p-3 rounded-xl bg-white/[0.03] border border-white/5">
+                  <p className="text-xs text-white/30 mb-1">Assigned To</p>
+                  <div className="flex items-center gap-1.5">
+                    <User size={12} className="text-white/40" />
+                    <p className="text-sm font-medium text-white truncate">
+                      {selectedTask.assignedToName || '—'}
+                    </p>
+                  </div>
+                </div>
+                <div className="p-3 rounded-xl bg-white/[0.03] border border-white/5">
+                  <p className="text-xs text-white/30 mb-1">Priority</p>
+                  <span className={`text-sm font-semibold capitalize ${pc.color}`}>
+                    {selectedTask.priority}
+                  </span>
+                </div>
+                <div className="p-3 rounded-xl bg-white/[0.03] border border-white/5">
+                  <p className="text-xs text-white/30 mb-1">Status</p>
+                  <span className={`text-sm font-semibold ${sc.color}`}>
+                    {sc.label}
+                  </span>
+                </div>
+                <div className={`p-3 rounded-xl border ${
+                  isOverdue
+                    ? 'bg-red-500/5 border-red-500/15'
+                    : 'bg-white/[0.03] border-white/5'
+                }`}>
+                  <p className="text-xs text-white/30 mb-1">Deadline</p>
+                  <div className="flex items-center gap-1">
+                    {isOverdue && <AlertCircle size={11} className="text-red-400" />}
+                    <p className={`text-sm font-medium ${isOverdue ? 'text-red-400' : 'text-white'}`}>
+                      {selectedTask.deadline?.toDate
+                        ? format(selectedTask.deadline.toDate(), 'MMM d, yyyy')
+                        : '—'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Status Action Buttons */}
+              <div className="space-y-2">
+                <p className="text-xs text-white/30 uppercase tracking-wider">Update Status</p>
+                <div className="flex flex-col gap-2">
+
+                  {selectedTask.status !== 'in_progress' && selectedTask.status !== 'completed' && (
+                    <button
+                      onClick={() => handleStatusChange(selectedTask, 'in_progress')}
+                      disabled={updating}
+                      className="flex items-center gap-3 p-3 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-400 hover:bg-blue-500/20 transition-all active:scale-[0.98] disabled:opacity-40"
+                    >
+                      <PlayCircle size={18} />
+                      <span className="text-sm font-medium">Mark as In Progress</span>
+                    </button>
+                  )}
+
+                  {selectedTask.status !== 'completed' && (
+                    <button
+                      onClick={() => handleStatusChange(selectedTask, 'completed')}
+                      disabled={updating}
+                      className="flex items-center gap-3 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20 transition-all active:scale-[0.98] disabled:opacity-40"
+                    >
+                      <CheckCircle2 size={18} />
+                      <span className="text-sm font-medium">Mark as Completed</span>
+                    </button>
+                  )}
+
+                  {selectedTask.status === 'completed' && (
+                    <button
+                      onClick={() => handleStatusChange(selectedTask, 'pending')}
+                      disabled={updating}
+                      className="flex items-center gap-3 p-3 rounded-xl bg-yellow-500/10 border border-yellow-500/20 text-yellow-400 hover:bg-yellow-500/20 transition-all active:scale-[0.98] disabled:opacity-40"
+                    >
+                      <Clock size={18} />
+                      <span className="text-sm font-medium">Reset to Pending</span>
+                    </button>
+                  )}
+
+                </div>
+              </div>
+
+              {/* Delete */}
+              <div className="pt-1 border-t border-white/5">
+                <button
+                  onClick={(e) => handleDelete(selectedTask.id, e)}
+                  className="flex items-center gap-2 text-sm text-red-400/60 hover:text-red-400 transition-colors py-1"
+                >
+                  <Trash2 size={14} />
+                  Delete this task
+                </button>
+              </div>
+
+            </div>
+          );
+        })()}
+      </Modal>
+
+      {/* ─── Assign Task Modal ─── */}
       <Modal
         isOpen={showAdd}
         onClose={() => { setShowAdd(false); setForm(emptyForm); }}
@@ -287,6 +453,7 @@ export default function AdminTasks() {
           </div>
         </div>
       </Modal>
+
     </div>
   );
 }

@@ -13,9 +13,12 @@ export const createTask = async (task) => {
 };
 
 export const updateTaskStatus = async (taskId, status) => {
+  const { doc, updateDoc, serverTimestamp } = await import('firebase/firestore');
+  const { db } = await import('../firebase/config');
   await updateDoc(doc(db, 'tasks', taskId), {
-    status, completedAt: status === 'completed' ? serverTimestamp() : null,
-    updatedAt: serverTimestamp()
+    status,
+    updatedAt: serverTimestamp(),
+    ...(status === 'completed' ? { completedAt: serverTimestamp() } : {})
   });
 };
 
