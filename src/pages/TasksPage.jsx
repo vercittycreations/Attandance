@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { getEmployeeTasks, updateTaskStatus } from '../services/taskService';
-import { FocusWidget } from '../components/focus/FocusWidget';
+import  FocusWidget from '../components/focus/FocusWidget';
 import Modal from '../components/common/Modal';
 import {
   CheckCircle2, Clock, PlayCircle,
