@@ -13,9 +13,9 @@ import { initPushNotifications, logoutPush } from '../services/pushService';
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
-  const [currentUser, setCurrentUser]   = useState(null);
-  const [userProfile, setUserProfile]   = useState(null);
-  const [loading, setLoading]           = useState(true);
+  const [currentUser, setCurrentUser] = useState(null);
+  const [userProfile, setUserProfile] = useState(null);
+  const [loading, setLoading]         = useState(true);
 
   const login = (email, password) =>
     signInWithEmailAndPassword(auth, email, password);
@@ -24,7 +24,6 @@ export function AuthProvider({ children }) {
     signInWithPopup(auth, googleProvider);
 
   const logout = async () => {
-    // Fire and forget — never block logout
     if (currentUser) {
       logoutPush(currentUser.uid).catch(() => {});
     }
@@ -58,7 +57,37 @@ export function AuthProvider({ children }) {
       const snap = await getDoc(doc(db, 'employees', currentUser.uid));
       if (snap.exists()) setUserProfile(snap.data());
     } catch (err) {
-      console.error('Refresh profile error:', err);
+      console.error(err);
+    }
+  };
+
+  const saveUserProfile = async (user) => {
+    try {
+      const snap = await getDoc(doc(db, 'employees', user.uid));
+      if (snap.exists()) {
+        setUserProfile(snap.data());
+      } else {
+        const profile = {
+          uid:               user.uid,
+          name:              user.displayName || 'User',
+          email:             user.email,
+          role:              'employee',
+          department:        'General',
+          photoURL:          user.photoURL || '',
+          joinDate:          serverTimestamp(),
+          isActive:          true,
+          productivityScore: 0,
+          streak:            0,
+          isOnline:          false,
+          pushSubscription:  null,
+          createdAt:         serverTimestamp(),
+          updatedAt:         serverTimestamp()
+        };
+        await setDoc(doc(db, 'employees', user.uid), profile);
+        setUserProfile(profile);
+      }
+    } catch (err) {
+      console.error('saveUserProfile error:', err);
     }
   };
 
@@ -67,35 +96,8 @@ export function AuthProvider({ children }) {
       try {
         if (user) {
           setCurrentUser(user);
-
-          const snap = await getDoc(doc(db, 'employees', user.uid));
-
-          if (snap.exists()) {
-            setUserProfile(snap.data());
-          } else {
-            const profile = {
-              uid:               user.uid,
-              name:              user.displayName || 'User',
-              email:             user.email,
-              role:              'employee',
-              department:        'General',
-              photoURL:          user.photoURL || '',
-              joinDate:          serverTimestamp(),
-              isActive:          true,
-              productivityScore: 0,
-              streak:            0,
-              isOnline:          false,
-              pushSubscription:  null,
-              createdAt:         serverTimestamp(),
-              updatedAt:         serverTimestamp()
-            };
-            await setDoc(doc(db, 'employees', user.uid), profile);
-            setUserProfile(profile);
-          }
-
-          // ✅ Fire and forget — auth ko kabhi block nahi karega
+          await saveUserProfile(user);
           initPushNotifications(user.uid).catch(() => {});
-
         } else {
           setCurrentUser(null);
           setUserProfile(null);
@@ -105,11 +107,9 @@ export function AuthProvider({ children }) {
         setCurrentUser(null);
         setUserProfile(null);
       } finally {
-        // ✅ Always runs — app never gets stuck
         setLoading(false);
       }
     });
-
     return unsub;
   }, []);
 
